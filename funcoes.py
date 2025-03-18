@@ -7,11 +7,31 @@ from sqlalchemy import create_engine, select, MetaData, Table
 from sqlalchemy.orm import sessionmaker
 import shutil
 import PyPDF2
+import pytesseract
+
 #in/out 3100, 1300, 3800, 1450
 usuario_conectado = 'samuel.santos'
 # Configure o caminho do executável do Tesseract
+pytesseract.pytesseract.tesseract_cmd = fr'C:\Users\{usuario_conectado}\AppData\Local\Programs\Tesseract-OCR\tesseract.exe'
 
-      
+def pdf_ocr(image):
+    # Select the first page
+    config = pytesseract.pytesseract.tesseract_cmd
+    
+    # Define o idioma para o reconhecimento de texto (por exemplo, português)
+    config += r'--oem 3 --psm 6 -l por'
+    config += r'--psm 6 outputbase alphanumeric'
+
+    return pytesseract.image_to_string(image,config=config)
+
+def pdf_to_image(pdf_path):
+
+    # Converte o PDF em uma lista de imagens
+    images = convert_from_path(pdf_path, 500, poppler_path=r'C:\poppler-0.68.0\bin')
+    imagem = images[0]
+    #imagem.show()
+    return imagem  
+
 def dados_excel(cnpj, valor_total,volume_total, data_emissao, data_inicio, data_fim, numero_fatura, valor_icms, correcao_pcs, dist):
    
     dados = {
@@ -82,17 +102,18 @@ def verificar_fatura_existe(session, tabela_faturas, numero_fatura):
     result = session.execute(stmt).fetchone()
     return result is not None
 
-def verificar_download(cnpj, data_inicio, data_fim, excel_path):
+def verificar_download(cnpj, data_inicio, data_fim, valor_total, caminho_excel):
     # Carregar o arquivo Excel
-    df = pd.read_excel(excel_path, sheet_name='Sheet1')
+    df = pd.read_excel(caminho_excel, sheet_name='Sheet1')
     
     cnpj = int(cnpj)
 
     # Filtrar as linhas que correspondem aos critérios
     df_filtrado = df[
         (df['CNPJ'] == cnpj) &
-        (df['DATA INICIO'] == data_inicio) &
-        (df['DATA FIM'] == data_fim)
+        (df['Data Inicio'] == data_inicio) &
+        (df['Data Fim'] == data_fim) &
+        (df['Valor Total'] == valor_total)
     ]
     
     class ExtratorFaturas:
@@ -121,13 +142,17 @@ def verificar_download(cnpj, data_inicio, data_fim, excel_path):
     
     def extrair_texto(caminho_do_pdf):
         texto = ''
-        with open(caminho_do_pdf, 'rb') as arquivo:
-            leitor_pdf = PyPDF2.PdfReader(arquivo)
-            for pagina in leitor_pdf.pages:
-                texto_pagina = pagina.extract_text()
-                if texto_pagina:
-                    texto += texto_pagina + ' '  # Substitui '\n' por ' ' para evitar linhas extras
-        return texto.strip()  # Remove espaços extras no início e no fim
+        try:
+            with open(caminho_do_pdf, 'rb') as arquivo:
+                leitor_pdf = PyPDF2.PdfReader(arquivo)
+                for pagina in leitor_pdf.pages:
+                    texto_pagina = pagina.extract_text()
+                    if texto_pagina:
+                        texto += texto_pagina + ' '  # Substitui '\n' por ' ' para evitar linhas extras
+            return texto.strip()  # Remove espaços extras no início e no fim
+        except Exception as e:
+            print(f"Erro ao extrair texto: {e}")
+            return None
     
     def adicionar_na_planilha(informacoes, caminho_planilha, nome_arquivo):
         df = pd.read_excel(caminho_planilha)
@@ -146,30 +171,9 @@ def verificar_download(cnpj, data_inicio, data_fim, excel_path):
         df = pd.concat([df, nova_linha], ignore_index=True)
         df.to_excel(caminho_planilha, index=False)
     
-    def main(file_path, pdf_file, caminho_planilha):
-        texto_pypdf = extrair_texto(pdf_file)
-        if not texto_pypdf:
-            print(f"Erro ao extrair texto do PDF: {pdf_file}")
-            return
-    
-        extrator = ExtratorFaturas()
-        informacoes = extrator.extrair_informacoes(texto_pypdf)
-        if not any(informacoes.values()):
-            print(f"Nenhuma informação extraída do PDF: {pdf_file}")
-            return
-    
-        adicionar_na_planilha(informacoes, caminho_planilha, os.path.basename(pdf_file))
-        print(informacoes)
-    
-    # Exemplo de uso
-    file_path = r'G:\QUALIDADE\Códigos\Leitura de Faturas Gás\Códigos\Comgás\Faturas'
-    diretorio_destino = r'G:\QUALIDADE\Códigos\Leitura de Faturas Gás\Códigos\Comgás\Lidos'
-    caminho_planilha = r'G:\QUALIDADE\Códigos\Leitura de Faturas Gás\Códigos\Comgás\informacoes_faturas.xlsx'
-    
-    for arquivo in os.listdir(file_path):
-        if arquivo.endswith('.pdf') or arquivo.endswith('.PDF'):
-            arquivo_full = rf'G:\QUALIDADE\Códigos\Leitura de Faturas Gás\Códigos\Comgás\Faturas\{arquivo}' 
-            main(arquivo, arquivo_full, caminho_planilha)
 
 
+def mover_arquivo(origem, destino):
+    shutil.move(origem, destino)
+    print(f"Arquivo movido para {destino}")
 
